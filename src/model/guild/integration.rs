@@ -5,6 +5,7 @@ use super::*;
 #[non_exhaustive]
 pub struct Integration {
     pub id: IntegrationId,
+    pub guild_id: GuildId,
     pub account: IntegrationAccount,
     pub enabled: bool,
     #[serde(rename = "expire_behaviour")]
@@ -30,6 +31,7 @@ pub struct Integration {
 pub enum IntegrationExpireBehaviour {
     RemoveRole = 0,
     Kick = 1,
+    Unknown = !0,
 }
 
 enum_number!(IntegrationExpireBehaviour {

@@ -616,6 +616,7 @@ impl Message {
             message_id: self.id,
             user_id,
             guild_id: self.guild_id,
+            member: self.member.clone(),
         })
     }
 
@@ -855,13 +856,16 @@ impl Message {
     /// The link will be valid for messages in either private channels or guilds.
     #[inline]
     pub fn link(&self) -> String {
-        match self.guild_id {
-            Some(guild_id) => format!(
-                "https://discord.com/channels/{}/{}/{}",
-                guild_id.0, self.channel_id.0, self.id.0
-            ),
-            None => format!("https://discord.com/channels/@me/{}/{}", self.channel_id.0, self.id.0),
-        }
+        self.id.link(self.channel_id, self.guild_id)
+    }
+
+    /// Same as [`Self::link`] but tries to find the [`GuildId`]
+    /// if Discord does not provide it.
+    ///
+    /// [`guild_id`]: Self::guild_id
+    #[inline]
+    pub async fn link_ensured(&self, cache_http: impl CacheHttp) -> String {
+        self.id.link_ensured(cache_http, self.channel_id, self.guild_id).await
     }
 
     /// Await a single reaction on this message.
@@ -891,11 +895,9 @@ impl Message {
     }
 
     pub(crate) fn check_content_length(map: &JsonMap) -> Result<()> {
-        if let Some(content) = map.get("content") {
-            if let Value::String(ref content) = *content {
-                if let Some(length_over) = Message::overflow_length(content) {
-                    return Err(Error::Model(ModelError::MessageTooLong(length_over)));
-                }
+        if let Some(Value::String(ref content)) = map.get("content") {
+            if let Some(length_over) = Message::overflow_length(content) {
+                return Err(Error::Model(ModelError::MessageTooLong(length_over)));
             }
         }
 
@@ -1032,6 +1034,8 @@ pub enum MessageType {
     ApplicationCommand = 20,
     /// Server setup tips.
     GuildInviteReminder = 22,
+    /// An indicator that the message is of unknown type.
+    Unknown = !0,
 }
 
 enum_number!(MessageType {
@@ -1054,41 +1058,18 @@ enum_number!(MessageType {
     ApplicationCommand,
 });
 
-impl MessageType {
-    pub fn num(self) -> u64 {
-        use self::MessageType::*;
-
-        match self {
-            Regular => 0,
-            GroupRecipientAddition => 1,
-            GroupRecipientRemoval => 2,
-            GroupCallCreation => 3,
-            GroupNameUpdate => 4,
-            GroupIconUpdate => 5,
-            PinsAdd => 6,
-            MemberJoin => 7,
-            NitroBoost => 8,
-            NitroTier1 => 9,
-            NitroTier2 => 10,
-            NitroTier3 => 11,
-            ChannelFollowAdd => 12,
-            GuildDiscoveryDisqualified => 14,
-            GuildDiscoveryRequalified => 15,
-            InlineReply => 19,
-            ApplicationCommand => 20,
-            GuildInviteReminder => 22,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum MessageActivityKind {
+    #[allow(clippy::upper_case_acronyms)]
     JOIN = 1,
+    #[allow(clippy::upper_case_acronyms)]
     SPECTATE = 2,
+    #[allow(clippy::upper_case_acronyms)]
     LISTEN = 3,
     #[allow(non_camel_case_types)]
     JOIN_REQUEST = 5,
+    Unknown = !0,
 }
 
 enum_number!(MessageActivityKind {
@@ -1097,19 +1078,6 @@ enum_number!(MessageActivityKind {
     LISTEN,
     JOIN_REQUEST
 });
-
-impl MessageActivityKind {
-    pub fn num(self) -> u64 {
-        use self::MessageActivityKind::*;
-
-        match self {
-            JOIN => 1,
-            SPECTATE => 2,
-            LISTEN => 3,
-            JOIN_REQUEST => 5,
-        }
-    }
-}
 
 /// Rich Presence application information.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1228,5 +1196,40 @@ impl Serialize for MessageFlags {
         S: Serializer,
     {
         serializer.serialize_u64(self.bits())
+    }
+}
+
+#[cfg(feature = "model")]
+impl MessageId {
+    /// Returns a link referencing this message. When clicked, users will jump to the message.
+    /// The link will be valid for messages in either private channels or guilds.
+    pub fn link(&self, channel_id: ChannelId, guild_id: Option<GuildId>) -> String {
+        match guild_id {
+            Some(guild_id) => {
+                format!("https://discord.com/channels/{}/{}/{}", guild_id.0, channel_id.0, self.0)
+            },
+            None => format!("https://discord.com/channels/@me/{}/{}", channel_id.0, self.0),
+        }
+    }
+
+    /// Same as [`Self::link`] but tries to find the [`GuildId`]
+    /// if it is not provided.
+    pub async fn link_ensured(
+        &self,
+        cache_http: impl CacheHttp,
+        channel_id: ChannelId,
+        mut guild_id: Option<GuildId>,
+    ) -> String {
+        if guild_id.is_none() {
+            let found_channel = channel_id.to_channel(cache_http).await;
+
+            if let Ok(channel) = found_channel {
+                if let Some(c) = channel.guild() {
+                    guild_id = Some(c.guild_id);
+                }
+            }
+        }
+
+        self.link(channel_id, guild_id)
     }
 }
