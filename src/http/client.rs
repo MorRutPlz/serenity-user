@@ -99,10 +99,7 @@ impl<'a> HttpBuilder<'a> {
     /// Sets a token for the bot. If the token is not prefixed "Bot ", this
     /// method will automatically do so.
     pub fn token(mut self, token: impl AsRef<str>) -> Self {
-        let token = token.as_ref().trim();
-
-        let token =
-            if token.starts_with("Bot ") { token.to_string() } else { format!("Bot {}", token) };
+        let token = token.as_ref().trim().to_owned();
 
         self.token = Some(token);
 
@@ -264,13 +261,7 @@ impl Http {
         let builder = configure_client_backend(Client::builder());
         let built = builder.build().expect("Cannot build reqwest::Client");
 
-        let token = if token.trim().starts_with("Bot ") {
-            token.to_string()
-        } else {
-            format!("Bot {}", token)
-        };
-
-        Self::new(Arc::new(built), &token)
+        Self::new(Arc::new(built), token)
     }
 
     #[cfg(feature = "unstable_discord_api")]
